@@ -1,0 +1,53 @@
+# Table describing sample-specific continuous BED files and their covariate BED files.
+# Required columns: sample_id, celltype, sample_bed, covariate_bed
+samples_table: "config/samples.tsv"
+
+celltypes:
+  - cortical
+  - inter
+  - Astro
+  - Micro
+  - Oligo
+
+# Prefix to chromosome-specific PLINK reference files. Must contain {chr}.
+plink_prefix_template: "/path/to/plink_reference/{chr}"
+
+# Full path to ldsc.py
+ldsc_py: "/path/to/ldsc/ldsc.py"
+
+# Path to the continuous annotation script included in this repository.
+make_continuous_annot_script: "scripts/make_continuous_annot.py"
+
+# LDSC baseline annotation prefix.
+baseline_prefix: "/path/to/baseline/baseline."
+
+# LDSC regression weights prefix.
+weights_prefix: "/path/to/weights/"
+
+# Allele frequency prefix.
+frq_prefix: "/path/to/frequency/"
+
+# Directory containing LDSC-ready munged summary statistics.
+sumstats_dir: "/path/to/sumstats"
+sumstats_suffix: ".sumstats.gz"
+
+# Leave empty to auto-discover all files in sumstats_dir matching *sumstats_suffix.
+traits: []
+
+chroms: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+
+covariate_annotation_name: "mean_ipkm"
+sample_annotation_name: "sample_ipkm"
+
+# Supported values: mean, max, sum, first
+overlap_strategy: "mean"
+
+ld_wind_kb: 2000
+
+annot_dir: "annotations"
+ldscore_dir: "ldscores"
+results_dir: "results"
+
+make_annot_mem_mb: 8000
+ldscore_mem_mb: 12000
+h2_mem_mb: 12000

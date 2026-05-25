@@ -1,0 +1,3 @@
+sample_id	celltype	sample_bed	covariate_bed
+sample_001	cortical	/path/to/beds/cortical/sample_001.bed	/path/to/beds/covariates/cortical_mean.bed
+sample_002	Astro	/path/to/beds/Astro/sample_002.bed	/path/to/beds/covariates/Astro_mean.bed

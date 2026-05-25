@@ -1,0 +1,14 @@
+name: ldsc_continuous_covariate
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  - python=3.10
+  - snakemake
+  - pandas=1.5.3
+  - numpy
+  - scipy
+  - pybedtools
+  - bedtools
+  - pip

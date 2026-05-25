@@ -1,0 +1,337 @@
+configfile: "config/config.yaml"
+
+import os
+import glob
+import csv
+
+CELLTYPES = config.get("celltypes", [])
+SAMPLES_TABLE = config.get("samples_table", "")
+PLINK_PREFIX_TEMPLATE = config.get("plink_prefix_template", "")
+BASELINE_PREFIX = config.get("baseline_prefix", "")
+WEIGHTS_PREFIX = config.get("weights_prefix", "")
+FRQ_PREFIX = config.get("frq_prefix", "")
+SUMSTATS_DIR = config.get("sumstats_dir", "")
+SUMSTATS_SUFFIX = config.get("sumstats_suffix", ".sumstats.gz")
+TRAITS = config.get("traits", [])
+CHROMS = [str(c) for c in config.get("chroms", list(range(1, 23)))]
+LDSC_PY = config.get("ldsc_py", "")
+MAKE_CONTINUOUS_ANNOT_SCRIPT = config.get("make_continuous_annot_script", "scripts/make_continuous_annot.py")
+LD_WIND_KB = config.get("ld_wind_kb", 2000)
+
+ANNOT_DIR = config.get("annot_dir", "annotations")
+LDSCORE_DIR = config.get("ldscore_dir", "ldscores")
+RESULTS_DIR = config.get("results_dir", "results")
+
+COVARIATE_ANNOT_NAME = config.get("covariate_annotation_name", "mean_ipkm")
+SAMPLE_ANNOT_NAME = config.get("sample_annotation_name", "sample_ipkm")
+OVERLAP_STRATEGY = config.get("overlap_strategy", "mean")
+
+MAKE_ANNOT_MEM_MB = config.get("make_annot_mem_mb", 8000)
+LDSCORE_MEM_MB = config.get("ldscore_mem_mb", 12000)
+H2_MEM_MB = config.get("h2_mem_mb", 12000)
+
+
+def require_nonempty(name, value):
+    if value in (None, "", [], {}):
+        raise ValueError(f"Missing required config value: {name}")
+    return value
+
+
+def read_samples_table():
+    require_nonempty("samples_table", SAMPLES_TABLE)
+    if not os.path.exists(SAMPLES_TABLE):
+        raise ValueError(f"samples_table not found: {SAMPLES_TABLE}")
+
+    samples = {}
+    with open(SAMPLES_TABLE) as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        required = {"sample_id", "celltype", "sample_bed", "covariate_bed"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"samples_table is missing columns: {', '.join(sorted(missing))}")
+        for row in reader:
+            sample_id = row["sample_id"]
+            if sample_id in samples:
+                raise ValueError(f"Duplicate sample_id in samples_table: {sample_id}")
+            samples[sample_id] = row
+    if not samples:
+        raise ValueError("samples_table is empty")
+    return samples
+
+
+SAMPLES = read_samples_table()
+SAMPLE_IDS = sorted(SAMPLES.keys())
+SAMPLE_TO_CELLTYPE = {s: SAMPLES[s]["celltype"] for s in SAMPLE_IDS}
+CELLTYPE_SAMPLE_PAIRS = sorted([(SAMPLES[s]["celltype"], s) for s in SAMPLE_IDS])
+CELLTYPES_FROM_TABLE = sorted(set(SAMPLE_TO_CELLTYPE.values()))
+
+
+def discover_traits():
+    traits = []
+    for path in glob.glob(os.path.join(SUMSTATS_DIR, f"*{SUMSTATS_SUFFIX}")):
+        traits.append(os.path.basename(path)[:-len(SUMSTATS_SUFFIX)])
+    return sorted(set(traits))
+
+if not TRAITS:
+    TRAITS = discover_traits()
+
+H2_TARGETS = [
+    f"{RESULTS_DIR}/{trait}/{celltype}.{sample}.results"
+    for trait in TRAITS
+    for celltype, sample in CELLTYPE_SAMPLE_PAIRS
+]
+
+
+def validate_config():
+    require_nonempty("plink_prefix_template", PLINK_PREFIX_TEMPLATE)
+    require_nonempty("baseline_prefix", BASELINE_PREFIX)
+    require_nonempty("weights_prefix", WEIGHTS_PREFIX)
+    require_nonempty("frq_prefix", FRQ_PREFIX)
+    require_nonempty("sumstats_dir", SUMSTATS_DIR)
+    require_nonempty("ldsc_py", LDSC_PY)
+    require_nonempty("make_continuous_annot_script", MAKE_CONTINUOUS_ANNOT_SCRIPT)
+
+    if "{chr}" not in PLINK_PREFIX_TEMPLATE:
+        raise ValueError("plink_prefix_template must contain {chr}")
+    if not os.path.exists(LDSC_PY):
+        raise ValueError(f"ldsc.py not found: {LDSC_PY}")
+    if not os.path.exists(MAKE_CONTINUOUS_ANNOT_SCRIPT):
+        raise ValueError(f"make_continuous_annot_script not found: {MAKE_CONTINUOUS_ANNOT_SCRIPT}")
+    if not os.path.isdir(SUMSTATS_DIR):
+        raise ValueError(f"sumstats_dir not found: {SUMSTATS_DIR}")
+    if not TRAITS:
+        raise ValueError(f"No traits found in {SUMSTATS_DIR} with suffix {SUMSTATS_SUFFIX}")
+
+    for sample_id, row in SAMPLES.items():
+        if not os.path.exists(row["sample_bed"]):
+            raise ValueError(f"sample_bed not found for {sample_id}: {row['sample_bed']}")
+        if not os.path.exists(row["covariate_bed"]):
+            raise ValueError(f"covariate_bed not found for {sample_id}: {row['covariate_bed']}")
+
+    for chr_ in CHROMS:
+        prefix = PLINK_PREFIX_TEMPLATE.format(chr=chr_)
+        for ext in [".bed", ".bim", ".fam"]:
+            if not os.path.exists(prefix + ext):
+                raise ValueError(f"Missing PLINK reference file: {prefix + ext}")
+
+    for chr_ in CHROMS:
+        for ext in [".annot.gz", ".l2.ldscore.gz", ".l2.M", ".l2.M_5_50"]:
+            p = f"{BASELINE_PREFIX}{chr_}{ext}"
+            if not os.path.exists(p):
+                raise ValueError(f"Missing baseline file: {p}")
+
+    for chr_ in CHROMS:
+        for ext in [".l2.ldscore.gz", ".l2.M", ".l2.M_5_50"]:
+            p = f"{WEIGHTS_PREFIX}{chr_}{ext}"
+            if not os.path.exists(p):
+                raise ValueError(f"Missing weights file: {p}")
+
+    for chr_ in CHROMS:
+        p = f"{FRQ_PREFIX}{chr_}.frq"
+        if not os.path.exists(p):
+            raise ValueError(f"Missing frequency file: {p}")
+
+validate_config()
+
+
+def check_sample_celltype(wc):
+    if SAMPLE_TO_CELLTYPE[wc.sample] != wc.celltype:
+        raise ValueError(
+            f"Inconsistent wildcards: sample {wc.sample} belongs to "
+            f"{SAMPLE_TO_CELLTYPE[wc.sample]}, not {wc.celltype}"
+        )
+
+localrules: all, summarize_results, summarize_sample_annotation
+
+rule all:
+    input:
+        H2_TARGETS,
+        f"{RESULTS_DIR}/all_results.tsv",
+        f"{RESULTS_DIR}/sample_annotation_results.tsv"
+
+rule make_covariate_annot:
+    input:
+        bed=lambda wc: next(row["covariate_bed"] for row in SAMPLES.values() if row["celltype"] == wc.celltype),
+        bim=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bim"
+    output:
+        f"{ANNOT_DIR}/covariates/{{celltype}}/{{chr}}.annot.gz"
+    threads: 1
+    resources:
+        mem_mb=MAKE_ANNOT_MEM_MB
+    shell:
+        r"""
+        mkdir -p $(dirname {output})
+        python {MAKE_CONTINUOUS_ANNOT_SCRIPT} \
+            --bed-file {input.bed} \
+            --bimfile {input.bim} \
+            --annot-file {output} \
+            --annot-name {COVARIATE_ANNOT_NAME} \
+            --overlap-strategy {OVERLAP_STRATEGY}
+        """
+
+rule make_sample_annot:
+    input:
+        bed=lambda wc: SAMPLES[wc.sample]["sample_bed"],
+        bim=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bim"
+    output:
+        f"{ANNOT_DIR}/samples/{{sample}}/{{chr}}.annot.gz"
+    threads: 1
+    resources:
+        mem_mb=MAKE_ANNOT_MEM_MB
+    shell:
+        r"""
+        mkdir -p $(dirname {output})
+        python {MAKE_CONTINUOUS_ANNOT_SCRIPT} \
+            --bed-file {input.bed} \
+            --bimfile {input.bim} \
+            --annot-file {output} \
+            --annot-name {SAMPLE_ANNOT_NAME} \
+            --overlap-strategy {OVERLAP_STRATEGY}
+        """
+
+rule compute_covariate_ldscore:
+    input:
+        bed=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bed",
+        bim=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bim",
+        fam=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".fam",
+        annot=f"{ANNOT_DIR}/covariates/{{celltype}}/{{chr}}.annot.gz"
+    output:
+        ldscore=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.ldscore.gz",
+        l2M=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.M",
+        l2M_5_50=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.M_5_50",
+        log=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.log"
+    threads: 1
+    resources:
+        mem_mb=LDSCORE_MEM_MB
+    params:
+        outprefix=lambda wc: f"{LDSCORE_DIR}/covariates/{wc.celltype}/{wc.chr}",
+        inprefix=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr)
+    shell:
+        r"""
+        mkdir -p $(dirname {output.ldscore})
+        python {LDSC_PY} \
+            --l2 \
+            --bfile {params.inprefix} \
+            --ld-wind-kb {LD_WIND_KB} \
+            --annot {input.annot} \
+            --out {params.outprefix}
+        """
+
+rule compute_sample_ldscore:
+    input:
+        bed=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bed",
+        bim=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".bim",
+        fam=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".fam",
+        annot=f"{ANNOT_DIR}/samples/{{sample}}/{{chr}}.annot.gz"
+    output:
+        ldscore=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.ldscore.gz",
+        l2M=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.M",
+        l2M_5_50=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.M_5_50",
+        log=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.log"
+    threads: 1
+    resources:
+        mem_mb=LDSCORE_MEM_MB
+    params:
+        outprefix=lambda wc: f"{LDSCORE_DIR}/samples/{wc.sample}/{wc.chr}",
+        inprefix=lambda wc: PLINK_PREFIX_TEMPLATE.format(chr=wc.chr)
+    shell:
+        r"""
+        mkdir -p $(dirname {output.ldscore})
+        python {LDSC_PY} \
+            --l2 \
+            --bfile {params.inprefix} \
+            --ld-wind-kb {LD_WIND_KB} \
+            --annot {input.annot} \
+            --out {params.outprefix}
+        """
+
+rule run_h2_continuous_covariate:
+    input:
+        sumstats=lambda wc: os.path.join(SUMSTATS_DIR, f"{wc.trait}{SUMSTATS_SUFFIX}"),
+        cov_ldscores=expand(
+            f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.{{suffix}}",
+            chr=CHROMS,
+            suffix=["annot.gz", "l2.ldscore.gz", "l2.M", "l2.M_5_50"]
+        ),
+        sample_ldscores=expand(
+            f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.{{suffix}}",
+            chr=CHROMS,
+            suffix=["annot.gz", "l2.ldscore.gz", "l2.M", "l2.M_5_50"]
+        ),
+        weights=expand(
+            f"{WEIGHTS_PREFIX}{{chr}}.{{suffix}}",
+            chr=CHROMS,
+            suffix=["l2.ldscore.gz", "l2.M", "l2.M_5_50"]
+        ),
+        frq=expand(f"{FRQ_PREFIX}{{chr}}.frq", chr=CHROMS)
+    output:
+        results=f"{RESULTS_DIR}/{{trait}}/{{celltype}}.{{sample}}.results",
+        log=f"{RESULTS_DIR}/{{trait}}/{{celltype}}.{{sample}}.log"
+    threads: 1
+    resources:
+        mem_mb=H2_MEM_MB
+    params:
+        outprefix=lambda wc: f"{RESULTS_DIR}/{wc.trait}/{wc.celltype}.{wc.sample}",
+        ref_ld_chr=lambda wc: (
+            f"{BASELINE_PREFIX},"
+            f"{LDSCORE_DIR}/covariates/{wc.celltype}/,"
+            f"{LDSCORE_DIR}/samples/{wc.sample}/"
+        )
+    run:
+        check_sample_celltype(wildcards)
+        shell(
+            r"""
+            mkdir -p $(dirname {output.results})
+            python {LDSC_PY} \
+                --h2 {input.sumstats} \
+                --ref-ld-chr {params.ref_ld_chr} \
+                --w-ld-chr {WEIGHTS_PREFIX} \
+                --frqfile-chr {FRQ_PREFIX} \
+                --overlap-annot \
+                --print-coefficients \
+                --out {params.outprefix}
+            """
+        )
+
+rule summarize_results:
+    input:
+        H2_TARGETS
+    output:
+        f"{RESULTS_DIR}/all_results.tsv"
+    run:
+        import csv
+        header_written = False
+        with open(output[0], "w") as out:
+            writer = None
+            for fn in input:
+                trait = os.path.basename(os.path.dirname(fn))
+                base = os.path.basename(fn).replace(".results", "")
+                celltype, sample = base.split(".", 1)
+                with open(fn) as f:
+                    reader = csv.DictReader(f, delimiter="\t")
+                    rows = list(reader)
+                    if not rows:
+                        continue
+                    if not header_written:
+                        fieldnames = ["trait", "celltype", "sample"] + reader.fieldnames
+                        writer = csv.DictWriter(out, fieldnames=fieldnames, delimiter="\t")
+                        writer.writeheader()
+                        header_written = True
+                    for row in rows:
+                        row.update({"trait": trait, "celltype": celltype, "sample": sample})
+                        writer.writerow(row)
+
+rule summarize_sample_annotation:
+    input:
+        f"{RESULTS_DIR}/all_results.tsv"
+    output:
+        f"{RESULTS_DIR}/sample_annotation_results.tsv"
+    run:
+        import csv
+        with open(input[0]) as fin, open(output[0], "w") as fout:
+            reader = csv.DictReader(fin, delimiter="\t")
+            writer = csv.DictWriter(fout, fieldnames=reader.fieldnames, delimiter="\t")
+            writer.writeheader()
+            for row in reader:
+                if SAMPLE_ANNOT_NAME in row.get("Category", ""):
+                    writer.writerow(row)
