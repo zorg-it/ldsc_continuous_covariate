@@ -6,9 +6,5 @@ channels:
 dependencies:
   - python=3.10
   - snakemake
-  - pandas=1.5.3
-  - numpy
-  - scipy
-  - pybedtools
-  - bedtools
-  - pip
+  - r-base
+  - bioconductor-genomicranges

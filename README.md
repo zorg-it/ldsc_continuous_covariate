@@ -1,14 +1,20 @@
 # ldsc_continuous_covariate
 
-Snakemake workflow for **continuous stratified LD Score Regression (S-LDSC)** using a sample-specific continuous annotation and a continuous covariate annotation.
+Snakemake workflow for **continuous stratified LD Score Regression
+(S-LDSC)** with a sample-specific continuous annotation and a continuous
+covariate.
 
-The intended model is:
+For every trait, cell type, and sample, the fitted model is:
 
 ```text
-baseline LDSC annotations + covariate continuous annotation + sample continuous annotation
+standard LDSC baseline
++ cell-type continuous covariate
++ sample-specific continuous annotation
 ```
 
-For iPKM analyses, the covariate can be a cell-type mean iPKM annotation, and the sample annotation can be the iPKM profile of a specific sample or age.
+For iPKM analyses, the covariate can be the mean iPKM profile of a cell
+type, while the sample-specific annotation can represent one sample or
+age.
 
 ## Repository structure
 
@@ -20,45 +26,34 @@ ldsc_continuous_covariate/
 │   ├── config.yaml
 │   └── samples.tsv
 ├── scripts/
-│   └── make_continuous_annot.py
+│   └── make_ldsc_continuous_annot.R
 ├── README.md
 ├── environment.yml
 └── .gitignore
 ```
 
-## Workflow overview
+## Workflow
 
 ```text
-sample continuous BED
-        │
-        ├──> continuous .annot.gz
-        │
-        ├──> LD scores
-        │
-        ▼
-covariate continuous BED
-        │
-        ├──> continuous .annot.gz
-        │
-        ├──> LD scores
-        │
-        ▼
-LDSC-ready .sumstats.gz
-        │
-        ▼
-ldsc.py --h2
-  baseline + covariate + sample
-        │
-        ▼
-results/{trait}/{celltype}.{sample}.results
-        │
-        ▼
-results/sample_annotation_results.tsv
+sample continuous BED ──> continuous .annot.gz ──> LD scores ──┐
+                                                               │
+covariate continuous BED -> continuous .annot.gz -> LD scores ─┤
+                                                               │
+baseline + LDSC-ready summary statistics ----------------------┤
+                                                               ▼
+                                                        ldsc.py --h2
+                                                               │
+                                                               ▼
+                                      trait/cell type/sample results
 ```
 
-## Input BED format
+Custom LD scores are printed for the same SNP set and in the same order
+as the baseline LD scores before the three filesets are concatenated in
+the regression.
 
-Both sample-specific and covariate BED files must contain four columns:
+## Continuous BED files
+
+Both sample-specific and covariate BED files contain four columns:
 
 ```text
 chr    start    end    value
@@ -72,15 +67,9 @@ Example:
 1    762078    763310    6.197571645
 ```
 
-For each SNP, the value assigned in the LDSC annotation is the value of the interval overlapping that SNP. SNPs outside intervals receive value `0`.
-
-If a SNP overlaps multiple intervals, the aggregation rule is controlled by:
-
-```yaml
-overlap_strategy: "mean"
-```
-
-Supported values are `mean`, `max`, `sum`, and `first`.
+The included R script assigns the fourth-column value to SNPs
+overlapping each interval. SNPs outside the intervals receive value
+`0`.
 
 ## Sample table
 
@@ -104,43 +93,67 @@ sample_001	cortical	/path/to/beds/cortical/sample_001.bed	/path/to/beds/covariat
 sample_002	Astro	/path/to/beds/Astro/sample_002.bed	/path/to/beds/covariates/Astro_mean.bed
 ```
 
-Each row defines one sample-specific LDSC analysis unit. The same covariate BED can be reused across multiple samples from the same cell type.
+Samples belonging to the same cell type use the same covariate BED.
 
 ## Configuration
 
-All paths in `config/config.yaml` are interpreted relative to the repository root when running:
+All paths in `config/config.yaml` are interpreted relative to the
+repository root when the workflow is launched from that directory.
 
-```bash
-snakemake --snakefile workflow/Snakefile --cores 4
-```
-
-Edit:
-
-```text
-config/config.yaml
-```
-
-Main fields:
+Set:
 
 ```yaml
 samples_table: "config/samples.tsv"
+
 plink_prefix_template: "/path/to/plink_reference/{chr}"
+
 ldsc_py: "/path/to/ldsc/ldsc.py"
+ldsc_python: "/path/to/ldsc_environment/bin/python"
+
+rscript: "Rscript"
+make_continuous_annot_script: "scripts/make_ldsc_continuous_annot.R"
+
 baseline_prefix: "/path/to/baseline/baseline."
 weights_prefix: "/path/to/weights/"
 frq_prefix: "/path/to/frequency/"
+
 sumstats_dir: "/path/to/sumstats"
 traits: []
 ```
 
-If `traits: []`, the workflow automatically uses all files in `sumstats_dir` matching `*.sumstats.gz`.
+When `traits: []`, all files in `sumstats_dir` matching
+`*.sumstats.gz` are discovered automatically.
+
+## Install the workflow environment
+
+Create and activate the mamba environment:
+
+```bash
+mamba env create -f environment.yml
+mamba activate ldsc_continuous_covariate
+```
+
+This environment provides Snakemake, R, and `GenomicRanges`.
+
+## Configure LDSC
+
+Set `ldsc_py` to the LDSC script and `ldsc_python` to the interpreter
+of the environment in which that LDSC installation runs.
+
+Example:
+
+```yaml
+ldsc_py: "/home/user/tools/ldsc/ldsc.py"
+ldsc_python: "/home/user/miniforge3/envs/ldsc/bin/python"
+```
 
 ## LDSC model
 
-For each trait, cell type, and sample, the workflow runs:
+For each trait, cell type, and sample, the workflow runs the equivalent
+of:
 
 ```bash
-ldsc.py \
+python ldsc.py \
   --h2 trait.sumstats.gz \
   --ref-ld-chr baseline.,covariate.,sample. \
   --w-ld-chr weights. \
@@ -150,53 +163,62 @@ ldsc.py \
   --out results/trait/celltype.sample
 ```
 
-The key term is the sample-specific annotation, interpreted conditional on both the standard LDSC baseline annotations and the continuous covariate annotation.
-
-For downstream plots across sample age, the most useful statistic is usually `Coefficient_z-score` for the row corresponding to the sample-specific annotation.
-
-The workflow writes these rows to:
+The custom annotation files generated by the original R script contain
+a column named `ANNOT`. With the prefix order shown above, LDSC reports:
 
 ```text
-results/sample_annotation_results.tsv
+ANNOTL2_1    cell-type covariate
+ANNOTL2_2    sample-specific annotation
 ```
 
-## Install environment
+The main statistic for downstream age-dependent plots is the
+`Coefficient_z-score` of `ANNOTL2_2`.
 
-Create the mamba/conda environment:
+## Matching the baseline SNP set
 
-```bash
-mamba env create -f environment.yml
-mamba activate ldsc_continuous_covariate
-```
+During each `--l2` step, the workflow:
 
-Install LDSC separately or point the config to an existing installation:
+1. extracts the SNP column from each chromosome-specific baseline LD
+   score file;
+2. supplies that list to LDSC through `--print-snps`;
+3. verifies that the resulting custom LD score has an identical SNP
+   column.
 
-```yaml
-ldsc_py: "/path/to/ldsc/ldsc.py"
-```
+This ensures that baseline, covariate, and sample LD scores can be
+concatenated by LDSC.
 
 ## Dry run
 
+From the repository root:
+
 ```bash
-snakemake --snakefile workflow/Snakefile -n -p
+snakemake --snakefile workflow/Snakefile --dry-run --printshellcmds
 ```
 
 ## Run
 
 ```bash
-snakemake --snakefile workflow/Snakefile --cores 4
+snakemake \
+  --snakefile workflow/Snakefile \
+  --cores 4 \
+  --rerun-incomplete \
+  --printshellcmds
 ```
 
-Increase `--cores` depending on the available machine.
+Adjust `--cores` to the available machine.
 
 ## Main outputs
 
 ```text
-annotations/covariates/{celltype}/{chr}.annot.gz
-annotations/samples/{sample}/{chr}.annot.gz
+print_snps/{chr}.snps
 
+ldscores/covariates/{celltype}/{chr}.annot.gz
 ldscores/covariates/{celltype}/{chr}.l2.ldscore.gz
+ldscores/covariates/{celltype}/{chr}.snps_match.ok
+
+ldscores/samples/{sample}/{chr}.annot.gz
 ldscores/samples/{sample}/{chr}.l2.ldscore.gz
+ldscores/samples/{sample}/{chr}.snps_match.ok
 
 results/{trait}/{celltype}.{sample}.results
 results/all_results.tsv

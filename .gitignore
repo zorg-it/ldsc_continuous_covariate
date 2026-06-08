@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 .snakemake/
-work/
-annotations/
+print_snps/
 ldscores/
 results/
