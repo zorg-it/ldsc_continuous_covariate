@@ -330,33 +330,15 @@ rule compute_covariate_ldscore:
         fam=lambda wc: (
             PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".fam"
         ),
-        annot=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.annot.gz"
-        ),
+        annot=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.annot.gz",
         print_snps=f"{PRINT_SNPS_DIR}/{{chr}}.snps",
         baseline=f"{BASELINE_PREFIX}{{chr}}.l2.ldscore.gz"
     output:
-        ldscore=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.l2.ldscore.gz"
-        ),
-        l2M=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.l2.M"
-        ),
-        l2M_5_50=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.l2.M_5_50"
-        ),
-        log=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.log"
-        ),
-        snps_ok=(
-            f"{LDSCORE_DIR}/covariates/"
-            "{{celltype}}/{{chr}}.snps_match.ok"
-        )
+        ldscore=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.ldscore.gz",
+        l2M=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.M",
+        l2M_5_50=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.l2.M_5_50",
+        log=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.log",
+        snps_ok=f"{LDSCORE_DIR}/covariates/{{celltype}}/{{chr}}.snps_match.ok"
     threads: 1
     resources:
         mem_mb=LDSCORE_MEM_MB
@@ -401,33 +383,15 @@ rule compute_sample_ldscore:
         fam=lambda wc: (
             PLINK_PREFIX_TEMPLATE.format(chr=wc.chr) + ".fam"
         ),
-        annot=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.annot.gz"
-        ),
+        annot=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.annot.gz",
         print_snps=f"{PRINT_SNPS_DIR}/{{chr}}.snps",
         baseline=f"{BASELINE_PREFIX}{{chr}}.l2.ldscore.gz"
     output:
-        ldscore=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.l2.ldscore.gz"
-        ),
-        l2M=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.l2.M"
-        ),
-        l2M_5_50=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.l2.M_5_50"
-        ),
-        log=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.log"
-        ),
-        snps_ok=(
-            f"{LDSCORE_DIR}/samples/"
-            "{{sample}}/{{chr}}.snps_match.ok"
-        )
+        ldscore=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.ldscore.gz",
+        l2M=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.M",
+        l2M_5_50=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.l2.M_5_50",
+        log=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.log",
+        snps_ok=f"{LDSCORE_DIR}/samples/{{sample}}/{{chr}}.snps_match.ok"
     threads: 1
     resources:
         mem_mb=LDSCORE_MEM_MB
@@ -508,14 +472,8 @@ rule run_h2_continuous_covariate:
             chr=CHROMS,
         )
     output:
-        results=(
-            f"{RESULTS_DIR}/{{trait}}/"
-            "{{celltype}}/{{sample}}.results"
-        ),
-        log=(
-            f"{RESULTS_DIR}/{{trait}}/"
-            "{{celltype}}/{{sample}}.log"
-        )
+        results=f"{RESULTS_DIR}/{{trait}}/{{celltype}}/{{sample}}.results",
+        log=f"{RESULTS_DIR}/{{trait}}/{{celltype}}/{{sample}}.log"
     threads: 1
     resources:
         mem_mb=H2_MEM_MB
