@@ -566,6 +566,12 @@ rule summarize_sample_annotation:
         matched = 0
         observed_categories = set()
 
+        sample_category_aliases = {SAMPLE_CATEGORY}
+        if SAMPLE_CATEGORY.startswith("ANNOT"):
+            sample_category_aliases.add(
+                SAMPLE_CATEGORY.replace("ANNOT", "", 1)
+            )
+
         with open(input[0]) as in_handle, open(
             output[0],
             "w",
@@ -582,10 +588,10 @@ rule summarize_sample_annotation:
             writer.writeheader()
 
             for row in reader:
-                category = row.get("Category", "")
+                category = row.get("Category", row.get("category", ""))
                 observed_categories.add(category)
 
-                if category == SAMPLE_CATEGORY:
+                if category in sample_category_aliases:
                     writer.writerow(row)
                     matched += 1
 
@@ -593,6 +599,8 @@ rule summarize_sample_annotation:
             raise ValueError(
                 "No sample-specific result rows matched "
                 f"sample_category={SAMPLE_CATEGORY}. "
-                "Observed categories include: "
+                "Tried aliases: "
+                + ", ".join(sorted(sample_category_aliases))
+                + ". Observed categories include: "
                 + ", ".join(sorted(observed_categories))
             )
